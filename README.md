@@ -31,8 +31,12 @@ Pengaman: ukuran sendiri (`live_size_sol`), slippage sendiri, tolak price impact
 satu transaksi per token sekaligus, jual gagal dicoba ulang otomatis.
 
 ## Perintah Telegram
-`/status` `/posisi` `/history [n]` `/scan` `/settings` `/set <nama> <nilai>` `/pause` `/resume`.
+`/status` `/posisi` `/close <id|$ticker>` `/history [n]` `/scan` `/settings` `/set <nama> <nilai>` `/pause` `/resume`.
 Semua setelan bisa diubah lewat `/set` atau Mini App; tiap perubahan dicatat dan bisa dibatalkan.
+Kartu notifikasi posisi baru menampilkan tombol **Close** di baris yang sama dengan GMGN dan CA; `/posisi` juga menampilkan tombol **Tutup**.
+Gunakan `/close <id>` atau `/close $TICKER` untuk meminta penutupan. Jika beberapa posisi terbuka memakai ticker yang sama,
+pilih ID posisi yang benar terlebih dulu. Semua jalur meminta konfirmasi kedua yang berlaku 60 detik; penutupan LIVE baru mencoba menjual token setelah konfirmasi.
+Penutupan PAPER memakai harga terbaru yang tersedia; bila harga tidak tersedia dan harga terakhir sudah basi, posisi dibiarkan terbuka.
 
 ## Batasan yang jujur
 - Eksekusi live belum pernah dikirim ke jaringan dengan dana sungguhan; format transaksi diuji terhadap API Jupiter asli dan

@@ -21,12 +21,15 @@ export function createNotifier({ tg, db, solUsd = async () => null, log = consol
     const usd = Math.abs(v * lastSol);
     return `${sign}$${usd >= 1 ? usd.toFixed(2) : usd.toFixed(4)}`;
   };
-  // Tombol di bawah pesan: 'Buka di Palic' (bila Mini App punya alamat publik, membuka posisi terkait), lalu GMGN dan CA token.
-  const keyboard = (mint, view = null) => {
+  // Satu baris: Mini App (jika tersedia), GMGN, CA, lalu Close hanya untuk notifikasi posisi baru dibuka.
+  const keyboard = (mint, view = null, closePositionId = null) => {
     const row = [];
     const url = view ? currentPublicUrl() : '';
     if (url) row.push({ text: 'Buka di Palic', web_app: { url: `${url}/?view=${view}` } });
     if (mint) row.push(...tokenButtons(mint));
+    if (Number.isSafeInteger(Number(closePositionId)) && Number(closePositionId) > 0) {
+      row.push({ text: `Close #${closePositionId}`, callback_data: `close:ask:${closePositionId}` });
+    }
     return row.length ? { reply_markup: { inline_keyboard: [row] } } : {};
   };
   const position = (id) => db.prepare('SELECT * FROM positions WHERE id = ?').get(id);
@@ -62,14 +65,17 @@ export function createNotifier({ tg, db, solUsd = async () => null, log = consol
             const pct = Number(p.pnl_pct);
             caption = [`<b>${pct > 0.05 ? 'PROFIT' : pct < -0.05 ? 'LOSS' : 'EVEN'}</b> · ${link} ${live ? 'sold' : 'closed (paper)'} · ${esc(EXIT_TEXT[p.exit_reason] || p.exit_reason)}`, `<b>Strategi: ${esc(strategyName(p.strategy))}</b>`, `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% · ${money(p.pnl_sol, true)}`].join('\n');
           }
-          await tg.sendPhoto(buffer, caption, { parse_mode: 'HTML', ...keyboard(p.mint, `positions/${p.id}`) });
+          const closeId = meta.kind === 'opened' ? p.id : null;
+          await tg.sendPhoto(buffer, caption, { parse_mode: 'HTML', ...keyboard(p.mint, `positions/${p.id}`, closeId) });
           return;
         }
       }
     } catch (err) { log(`[notifier] kartu gagal, kirim teks: ${err.message}`); }
     // Pesan teks (dan cadangan bila kartu gagal): tetap beri tombol GMGN/CA untuk token yang disebut.
-    const mint = meta.mint || ((meta.kind === 'opened' || meta.kind === 'closed') ? position(meta.positionId)?.mint : null);
-    await tg.send(text, keyboard(mint, meta.positionId ? `positions/${meta.positionId}` : null));
+    const related = (meta.kind === 'opened' || meta.kind === 'closed') ? position(meta.positionId) : null;
+    const mint = meta.mint || related?.mint || null;
+    const closeId = meta.kind === 'opened' ? meta.positionId : null;
+    await tg.send(text, keyboard(mint, meta.positionId ? `positions/${meta.positionId}` : null, closeId));
   }
 
   notify.dailyReport = async (report) => {

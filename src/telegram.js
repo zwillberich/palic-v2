@@ -23,6 +23,13 @@ export function createTelegram({ token, chatId = '', fetchImpl = fetch, log = co
     }
   }
 
+  async function sendOutput(id, out) {
+    if (typeof out === 'string') return sendTo(id, out);
+    const text = typeof out?.text === 'string' ? out.text : String(out ?? '');
+    const extra = out?.buttons?.length ? { reply_markup: { inline_keyboard: out.buttons } } : {};
+    return sendTo(id, text, extra);
+  }
+
   async function sendPhotoTo(id, buffer, caption = '', extra = {}) {
     if (!token || !id) return;
     const form = new FormData();
@@ -48,14 +55,30 @@ export function createTelegram({ token, chatId = '', fetchImpl = fetch, log = co
       if (chatId && /^\d+$/.test(String(chatId))) body.chat_id = Number(chatId);
       await call('setChatMenuButton', body);
     },
-    async poll(handler) {
+    async poll(handler, callbackHandler = null) {
       if (!token) return;
       let offset = 0;
       while (!stopped) {
         try {
-          const updates = await call('getUpdates', { offset, timeout: 25, allowed_updates: ['message'] }, 35_000);
+          const allowed_updates = callbackHandler ? ['message', 'callback_query'] : ['message'];
+          const updates = await call('getUpdates', { offset, timeout: 25, allowed_updates }, 35_000);
           for (const update of updates) {
             offset = update.update_id + 1;
+            const callback = update.callback_query;
+            if (callback) {
+              const from = String(callback.message?.chat?.id ?? '');
+              if (!chatId || from !== String(chatId) || typeof callbackHandler !== 'function') {
+                if (chatId && from && from !== String(chatId)) log(`[telegram] callback dari chat tidak terdaftar diabaikan: ${from}`);
+                await call('answerCallbackQuery', { callback_query_id: callback.id }).catch(() => {});
+                continue;
+              }
+              // Hentikan indikator loading lebih dulu; hasil aksi dikirim sebagai pesan terpisah.
+              await call('answerCallbackQuery', { callback_query_id: callback.id, text: 'Diproses…' }).catch((err) => log(`[telegram] callback answer: ${err.message}`));
+              try { await sendOutput(from, await callbackHandler(String(callback.data || ''))); }
+              catch (err) { await sendTo(from, `Error: ${err.message}`); }
+              continue;
+            }
+
             const msg = update.message;
             if (!msg?.text) continue;
             const from = String(msg.chat.id);
@@ -64,12 +87,8 @@ export function createTelegram({ token, chatId = '', fetchImpl = fetch, log = co
               continue;
             }
             if (from !== String(chatId)) { log(`[telegram] pesan dari chat tidak terdaftar diabaikan: ${from}`); continue; }
-            try {
-              // Handler boleh mengembalikan teks, atau { text, buttons } (baris tombol inline, mis. GMGN/CA per token).
-              const out = await handler(msg.text.trim());
-              if (typeof out === 'string') await sendTo(from, out);
-              else await sendTo(from, out.text, out.buttons?.length ? { reply_markup: { inline_keyboard: out.buttons } } : {});
-            } catch (err) { await sendTo(from, `Error: ${err.message}`); }
+            try { await sendOutput(from, await handler(msg.text.trim())); }
+            catch (err) { await sendTo(from, `Error: ${err.message}`); }
           }
         } catch (err) {
           log(`[telegram] polling: ${err.message}`);
