@@ -11,6 +11,7 @@ const HOUR = 3_600_000;
 const BLIND_GRACE_MS = 5 * 60_000;      // tanpa harga selama ini + likuiditas 0 -> pool dianggap mati
 const BLIND_MIN_LIQUIDITY_USD = 100;    // di bawah ini pool dianggap kosong (nilai residu 0,002 USD bukan likuiditas)
 const BLIND_MAX_MS = 30 * 60_000;       // tanpa harga selama ini (apa pun alasannya) -> dihapus buku sebagai rugi total
+const MANUAL_PRICE_MAX_AGE_MS = 120_000;
 
 export function createEngine({ db, jup, notify = async () => {}, now = () => Date.now(), pauseBetweenFetchesMs = 300, live = null, chain = null, rugcheck = null }) {
   const busy = new Set();   // mint/posisi yang sedang beli/jual on-chain: mencegah transaksi ganda
@@ -299,8 +300,18 @@ export function createEngine({ db, jup, notify = async () => {}, now = () => Dat
     const position = db.prepare("SELECT * FROM positions WHERE id = ? AND status = 'open'").get(positionId);
     if (!position) return { ok: false, error: 'Posisi terbuka tidak ditemukan.' };
     const prices = await jup.prices([position.mint]).catch(() => ({}));
-    const price = prices[position.mint] || position.last_price || position.entry_price;
-    const done = await closeAny(position, price, 'manual');
+    const current = db.prepare("SELECT * FROM positions WHERE id = ? AND status = 'open'").get(positionId);
+    if (!current) return { ok: false, error: 'Posisi sudah tidak terbuka.' };
+    const quotedPrice = Number(prices?.[current.mint]);
+    const lastPrice = Number(current.last_price);
+    const lastPriceAt = Number(current.last_price_ms || 0);
+    const recentLastPrice = Number.isFinite(lastPrice) && lastPrice > 0 && lastPriceAt > 0
+      && now() >= lastPriceAt && now() - lastPriceAt <= MANUAL_PRICE_MAX_AGE_MS;
+    if (current.execution_mode !== 'live' && !(Number.isFinite(quotedPrice) && quotedPrice > 0) && !recentLastPrice) {
+      return { ok: false, error: 'Harga terbaru tidak tersedia; posisi PAPER tetap terbuka agar PnL tidak dihitung dari harga basi.' };
+    }
+    const price = Number.isFinite(quotedPrice) && quotedPrice > 0 ? quotedPrice : (lastPrice > 0 ? lastPrice : current.entry_price);
+    const done = await closeAny(current, price, 'manual');
     return done ? { ok: true } : { ok: false, error: 'Penjualan gagal atau sedang berjalan; coba lagi sebentar lagi.' };
   }
 
@@ -316,4 +327,3 @@ export function fmt(n) {
   if (v >= 1) return v.toFixed(4);
   return v.toPrecision(4);
 }
-

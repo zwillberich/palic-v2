@@ -64,7 +64,7 @@ setInterval(runTick, 10_000);
 (function loopScan() {
   runP6().finally(() => setTimeout(loopScan, getSetting(db, 'scan_interval_s') * 1000));
 })();
-if (pollingOn) tg.poll(handle);
+if (pollingOn) tg.poll(handle, handle.callbackQuery);
 startMiniApp({ actions, tg });
 
 // Laporan harian (kartu) tiap hari sekitar 23:55 WIB.

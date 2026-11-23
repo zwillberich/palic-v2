@@ -60,6 +60,25 @@ test('waktu tahan selesai menutup posisi', async () => {
   assert.equal(row(e.db).exit_reason, 'time');
 });
 
+test('manual close PAPER memakai harga terbaru dan mencatat alasan manual', async () => {
+  const e = make();
+  const opened = open(e, 'A');
+  e.prices.A = 60;
+  assert.deepEqual(await e.engine.closeManually(opened.id), { ok: true });
+  assert.equal(row(e.db).exit_reason, 'manual');
+  assert.equal(row(e.db).exit_price, 60);
+});
+
+test('manual close PAPER menolak harga terakhir yang basi', async () => {
+  const e = make();
+  const opened = open(e, 'A');
+  e.clock.advance(120_001);
+  const result = await e.engine.closeManually(opened.id);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /harga terbaru tidak tersedia/i);
+  assert.equal(row(e.db).status, 'open');
+});
+
 test('risk: maks posisi, duplikat mint, cooldown, jeda rugi beruntun', async () => {
   const e = make();
   setSetting(e.db, 'p6_max_open', 2); setSetting(e.db, 'daily_loss_limit_sol', 0);
