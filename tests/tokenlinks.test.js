@@ -52,6 +52,14 @@ test('kartu posisi dibuka/ditutup membawa tombol GMGN dan CA untuk token itu', a
     assert.ok(b.some((x) => x.text === 'GMGN' && x.url === gmgnUrl(MINT_A)), 'tombol GMGN');
     assert.ok(b.some((x) => x.text === 'CA' && x.copy_text?.text === MINT_A), 'tombol CA');
   }
+  const opened = photos.find((p) => p.caption.includes('Position opened'));
+  const closed = photos.find((p) => !p.caption.includes('Position opened'));
+  assert.equal(opened.extra.reply_markup.inline_keyboard.length, 1);
+  const openedRow = opened.extra.reply_markup.inline_keyboard[0];
+  assert.ok(openedRow.some((x) => x.text === 'GMGN'));
+  assert.ok(openedRow.some((x) => x.text === 'CA'));
+  assert.ok(openedRow.some((x) => x.callback_data === 'close:ask:1'));
+  assert.ok(!buttonsOf(closed).some((x) => String(x.callback_data || '').startsWith('close:ask:')));
 });
 
 test('notifikasi teks yang menyebut token (peringatan, dipantau, gagal beli/jual) juga bertombol; yang tanpa token tidak', async () => {
@@ -76,6 +84,7 @@ test('perintah /posisi /history mengembalikan teks + baris tombol per token; kos
   assert.equal(typeof pos, 'object'); assert.match(pos.text, /AAA \[P6\]/); assert.match(pos.text, /tahan 60m/);
   assert.doesNotMatch(pos.text, /TP |SL /);                                   // P6 tidak punya TP/SL harga
   assert.equal(pos.buttons.length, 1); assert.equal(pos.buttons[0][1].copy_text.text, MINT_A);
+  assert.equal(pos.buttons[0][2].callback_data, 'close:ask:1');
   await e.engine.closeManually(1);
   assert.equal((await handle('/history')).buttons[0][0].text, 'GMGN AAA');
 });

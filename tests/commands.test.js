@@ -45,7 +45,7 @@ test('/posisi menyediakan tombol close dan close hanya berjalan setelah konfirma
   prices.M1 = 1.2;
 
   const listing = await handle('/posisi');
-  assert.equal(listing.buttons[0][0].callback_data, `close:ask:${id}`);
+  assert.equal(listing.buttons[0][2].callback_data, `close:ask:${id}`);
   const prompt = await handle(`/close ${id}`);
   assert.match(prompt.text, /PAPER/);
   assert.match(prompt.text, /konfirmasi/i);
@@ -59,6 +59,39 @@ test('/posisi menyediakan tombol close dan close hanya berjalan setelah konfirma
   assert.equal(closed.status, 'closed');
   assert.equal(closed.exit_reason, 'manual');
   assert.match(await handle.callbackQuery(confirmData), /sudah tidak aktif|sudah tidak terbuka/);
+});
+
+test('/close $ticker finds one open position and still requires the second confirmation', async () => {
+  const { db, handle, engine, prices } = setup();
+  const { id } = makeOpen(engine);
+  prices.M1 = 1.2;
+
+  const prompt = await handle('/close $aaa');
+  assert.match(prompt.text, new RegExp(`Konfirmasi tutup posisi #${id}`));
+  assert.equal(db.prepare('SELECT status FROM positions WHERE id = ?').get(id).status, 'open');
+  const response = await handle.callbackQuery(prompt.buttons[0][0].callback_data);
+  assert.match(response, /berhasil ditutup manual/);
+  assert.equal(db.prepare('SELECT status FROM positions WHERE id = ?').get(id).status, 'closed');
+});
+
+test('/close $ticker asks which position when several open positions share that ticker', async () => {
+  const { db, handle, engine, prices } = setup();
+  const first = makeOpen(engine);
+  const second = engine.openPaper({ mint: 'M2', symbol: 'AAA', price: 1, plan });
+  assert.equal(second.opened, true);
+  prices.M1 = 1.2; prices.M2 = 0.8;
+
+  const selection = await handle('/close $AAA');
+  assert.match(selection.text, /2 posisi terbuka/);
+  assert.deepEqual(selection.buttons.map((row) => row[0].callback_data), [`close:ask:${first.id}`, `close:ask:${second.id}`]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM positions WHERE status = 'open'").get().n, 2);
+
+  const prompt = await handle.callbackQuery(selection.buttons[1][0].callback_data);
+  assert.match(prompt.text, new RegExp(`Konfirmasi tutup posisi #${second.id}`));
+  assert.equal(db.prepare('SELECT status FROM positions WHERE id = ?').get(second.id).status, 'open');
+  assert.match(await handle.callbackQuery(prompt.buttons[0][0].callback_data), /berhasil ditutup manual/);
+  assert.equal(db.prepare('SELECT status FROM positions WHERE id = ?').get(first.id).status, 'open');
+  assert.equal(db.prepare('SELECT status FROM positions WHERE id = ?').get(second.id).status, 'closed');
 });
 
 test('close bisa dibatalkan dan konfirmasi kedaluwarsa setelah 60 detik', async () => {

@@ -13,9 +13,12 @@ const ago = (ms) => { const m = Math.round(ms / 60_000); return m < 90 ? `${m}m`
 export function createCommands({ db, engine, jup, now = () => Date.now() }) {
   const pendingCloses = new Map();
 
-  async function requestClose(rawId) {
+  const closeFormat = 'Format: /close <id|$ticker>. Lihat /posisi untuk ID posisi atau ticker.';
+  const tickerKey = (value) => String(value || '').trim().replace(/^\$/, '').toUpperCase();
+
+  async function requestCloseById(rawId) {
     const text = String(rawId || '').trim();
-    if (!/^\d{1,12}$/.test(text)) return 'Format: /close <id>. Lihat /posisi untuk ID posisi.';
+    if (!/^\d{1,12}$/.test(text)) return closeFormat;
     const id = Number(text);
     if (!Number.isSafeInteger(id) || id <= 0) return 'ID posisi tidak valid.';
     const position = db.prepare("SELECT id, mint, symbol, execution_mode, entry_price, last_price, last_price_ms FROM positions WHERE id = ? AND status = 'open'").get(id);
@@ -49,6 +52,23 @@ export function createCommands({ db, engine, jup, now = () => Date.now() }) {
     };
   }
 
+  async function requestClose(target) {
+    const text = String(target || '').trim();
+    if (!text) return closeFormat;
+    if (/^\d{1,12}$/.test(text)) return requestCloseById(text);
+    const ticker = text.startsWith('$') ? text.slice(1) : text;
+    if (!ticker || ticker.startsWith('$') || /\s/.test(ticker) || ticker.length > 64) return closeFormat;
+    const key = tickerKey(ticker);
+    const matches = db.prepare("SELECT id, symbol FROM positions WHERE status = 'open' ORDER BY id").all()
+      .filter((p) => tickerKey(p.symbol) === key);
+    if (!matches.length) return `Ticker $${ticker} tidak ditemukan di posisi terbuka. Lihat /posisi.`;
+    if (matches.length === 1) return requestCloseById(String(matches[0].id));
+    return {
+      text: `Ada ${matches.length} posisi terbuka untuk $${ticker}. Pilih ID yang ingin ditutup; pilihan ini belum menutup posisi dan tetap meminta konfirmasi kedua.`,
+      buttons: matches.slice(0, 100).map((p) => [{ text: `Pilih #${p.id}`, callback_data: `close:ask:${p.id}` }]),
+    };
+  }
+
   async function handleCallback(data) {
     const match = /^close:(ask|confirm|cancel):(\d{1,12})(?::(\d{10,16}))?$/.exec(String(data || ''));
     if (!match) return 'Tombol tidak dikenal.';
@@ -78,7 +98,7 @@ export function createCommands({ db, engine, jup, now = () => Date.now() }) {
     help: () => [
       'Palic v2 · strategi P6. Kontrol penuh di Mini App (tombol menu).',
       '/status ringkasan · /posisi posisi terbuka',
-      '/close <id> minta konfirmasi tutup · /history [n] transaksi tertutup',
+      '/close <id|$ticker> minta konfirmasi tutup · /history [n] transaksi tertutup',
       '/scan pindai sekarang · /settings daftar setelan · /set <nama> <nilai>',
       '/pause · /resume jeda entry baru',
       'Tutup LIVE baru dilakukan setelah tombol konfirmasi kedua ditekan.',
@@ -111,8 +131,8 @@ export function createCommands({ db, engine, jup, now = () => Date.now() }) {
         return `#${p.id} ${p.symbol} [${strategyName(p.strategy)}] · masuk ${fmt(p.entry_price)} · kini ${px ? fmt(px) : '?'}${pnl == null ? '' : ` (${sign(pnl)}%)`}\n   ${rules} · ${ago(now() - p.entry_ms)}`;
       }).join('\n');
       const buttons = open.slice(0, 20).map((p) => [
-        { text: `Tutup #${p.id}`, callback_data: `close:ask:${p.id}` },
         ...tokenButtons(p.mint),
+        { text: `Tutup #${p.id}`, callback_data: `close:ask:${p.id}` },
       ]);
       return { text, buttons };
     },
